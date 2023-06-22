@@ -22,23 +22,24 @@ class HmrmDomain:
     
     def _create_user_location_frequency_matrix(self, users_checkins):
         
-        placeids_int = users_checkins["placeid_int"].tolist()
-        userids = users_checkins["userid_int"]
-        total_users = len(users_checkins["userid_int"].unique())
-        total_places = len(users_checkins["placeid_int"].unique())
+        placeids = users_checkins["placeid"].tolist()
+        userids = users_checkins["userid"]
+        total_users = len(users_checkins["userid"].unique())
+        total_places = len(users_checkins["placeid"].unique())
+        print(total_places, total_users)
 
-        print("Shape: ", users_checkins.shape)
         self._user_location_frequency = sparse.lil_matrix((total_users, total_places))
         
-        for i in range(len(placeids_int)):
-            self._user_location_frequency[userids[i], placeids_int[i]] += 1
+        for i in range(len(placeids)):
+            self._user_location_frequency[userids[i], placeids[i]] += 1
+
 
     def _create_user_time_frequency_matrix(self, users_checkins: pd.DataFrame):
         users_checkins_sorted = users_checkins.sort_values(by=["datetime"])
         
-        users_ids = users_checkins_sorted["userid_int"]
+        users_ids = users_checkins_sorted["userid"]
         datetimes = pd.to_datetime(users_checkins["datetime"])
-        total_users = len(users_checkins["userid_int"].unique())
+        total_users = len(users_checkins["userid"].unique())
 
         self._user_time_frequency = np.zeros((total_users, 48))
 
@@ -47,12 +48,13 @@ class HmrmDomain:
                 self._user_time_frequency[i][j.hour + 24] += 1
             else:
                 self._user_time_frequency[i][j.hour] += 1
+        
 
     def _create_location_coocurrency_matrix(self, users_checkins):
         try:
             users_checkins_sorted = users_checkins.sort_values(by=["datetime"])
-            locations = users_checkins_sorted["placeid_int"].tolist()
-            number_of_locations = len(users_checkins["placeid_int"].unique())
+            locations = users_checkins_sorted["placeid"].tolist()
+            number_of_locations = len(users_checkins["placeid"].unique())
 
             self._location_co_ocurrency = sparse.lil_matrix((number_of_locations, number_of_locations)) ##location co occurency represents memory for save memory
             
@@ -75,33 +77,15 @@ class HmrmDomain:
                 ##PMI em subdivisoes da matriz esparsa
                 self._location_co_ocurrency[i] = np.maximum(np.log2(np.maximum(line * sum_of_dl, 1)/(l_occurrency[i] * c_occurrency)), 0)
 
-           
-            ##Non-sparse implementation
-            """ Dl = np.zeros((number_of_locations, number_of_locations))
-            for i in range(len(locations)):
-                for j in range(1, 6):
-                    if((i - j) < 0):
-                        break
-                    Dl[locations[i], locations[i - j]] += 1
-                for j in range(1, 6):
-                    if(i + j) > len(locations) - 1:
-                        break
-                    Dl[locations[i], locations[j + i]] += 1
-            sum_of_dl = np.sum(Dl)
-            l_occurrency = np.sum(Dl, axis=1).reshape(-1, 1)
-            c_occurrency = np.sum(Dl, axis=0).reshape(1, -1)
-            teste = np.maximum(np.log2(np.maximum(Dl * sum_of_dl, 1)/(l_occurrency * c_occurrency)), 0)
-            
-            print((self._location_co_ocurrency[1].toarray() == teste[1]).all())
-            print("FIM")         """
         except Exception as e:
             raise e
+        
     
     def _create_location_time_matrix(self, users_checinks):
         
-        locations = users_checinks["placeid_int"].tolist()
+        locations = users_checinks["placeid"].tolist()
         datetimes = users_checinks["datetime"].tolist()
-        total_locations = len(users_checinks["placeid_int"].unique())
+        total_locations = len(users_checinks["placeid"].unique())
         Dt = np.zeros((total_locations, 48))
 
         for i in range(len(locations)):
@@ -115,7 +99,7 @@ class HmrmDomain:
         c_occurrency = np.sum(Dt, axis=0).reshape(1, -1)
         
         self._location_time = np.maximum(np.log2(np.maximum(Dt * sum_of_dt, 1)/(l_occurrency * c_occurrency)), 0)
-
+       
     def _objective_function(self, weightL):
         
         first_equation = weightL * norm((self._user_location_frequency - np.dot(self.user_activity, self.activity_location.T)))
@@ -141,9 +125,9 @@ class HmrmDomain:
 
         return objective_function
     
-    def _initialize_parameters(self, checkins, K, M):
-        total_locations = len(checkins["placeid_int"].unique())
-        total_users = len(checkins["userid_int"].unique())
+    def _initialize_parameters(self, checkins, K, M):   
+        total_locations = len(checkins["placeid"].unique())
+        total_users = len(checkins["userid"].unique())
         time_slot = 48
 
         self.activity_location = np.random.normal(size = (total_locations, K))
@@ -158,7 +142,8 @@ class HmrmDomain:
         first_equation = (weightL * (self._user_location_frequency * self.activity_location)) + ((1 - weightL) * np.dot(self._user_time_frequency, self.activity_time)) 
         second_equation = (weightL * np.dot(self.activity_location.T, self.activity_location)) + ((1 - weightL) * np.dot(self.activity_time.T, self.activity_time) + (weightL * np.identity(K)))
         self.user_activity = np.dot(first_equation, inverse(second_equation))
-
+        self.user_activity = np.nan_to_num(self.user_activity)
+        
         first_equation = weightL * ((self._user_location_frequency.T * self.user_activity) + np.dot(self.context_location_embedding, self.activity_embedding.T))
         second_equation = (weightL * np.dot(self.user_activity.T, self.user_activity)) + ((self._weight + weightL) * np.identity(K))
         self.activity_location = np.dot(first_equation, inverse(second_equation))
@@ -166,44 +151,52 @@ class HmrmDomain:
         first_equation = (1 - weightL) * (np.dot(self._user_time_frequency.T, self.user_activity) + np.dot(self.time_slot_embedding, self.activity_embedding.T))
         second_equation = (1- weightL) * (np.dot(self.user_activity.T, self.user_activity) + (1 - self._weight + weightL) * np.identity(K))
         self.activity_time = np.dot(first_equation, inverse(second_equation))
+        self.activity_time = np.nan_to_num(self.activity_time)
 
         first_equation = (weightL * np.dot(self.activity_location.T, self.context_location_embedding)) + ((1 - weightL) * np.dot(self.activity_time.T, self.time_slot_embedding))
         second_equation = (weightL * np.dot(self.context_location_embedding.T, self.context_location_embedding)) + ((1 - weightL) * np.dot(self.time_slot_embedding.T, self.time_slot_embedding)) + (self._weight * np.identity(M))
         self.activity_embedding = np.dot(first_equation, inverse(second_equation))
+        self.activity_embedding = np.nan_to_num(self.activity_embedding)
 
         first_equation = (weightL * (self._location_co_ocurrency * self.context_location_embedding)) + ((1 - weightL) * np.dot(self._location_time, self.time_slot_embedding))
         second_equation = (weightL * np.dot(self.context_location_embedding.T, self.context_location_embedding)) + ((1 - weightL) * np.dot(self.time_slot_embedding.T, self.time_slot_embedding)) + (self._weight * np.identity(M))
         self.target_Location_embedding = np.dot(first_equation, inverse(second_equation))
-
+        self.target_Location_embedding = np.nan_to_num(self.target_Location_embedding)
+      
         first_equation = weightL * (self._location_co_ocurrency.T * self.target_Location_embedding + np.dot(self.activity_location, self.activity_embedding))
         second_equation = (weightL * (np.dot(self.target_Location_embedding.T, self.target_Location_embedding) + np.dot(self.activity_embedding.T, self.activity_embedding))) + (self._weight * np.identity(M))
         self.context_location_embedding = np.dot(first_equation, inverse(second_equation))
+        self.context_location_embedding = np.nan_to_num(self.context_location_embedding)
 
         first_equation = (1 - weightL) * (np.dot(self._location_time.T, self.target_Location_embedding) + np.dot(self.activity_time, self.activity_embedding))
         second_equation = ((1 - weightL) * (np.dot(self.target_Location_embedding.T, self.target_Location_embedding) + np.dot(self.activity_embedding.T, self.activity_embedding))) + (self._weight * np.identity(M))
         self.time_slot_embedding = np.dot(first_equation, inverse(second_equation))
+        self.time_slot_embedding = np.nan_to_num(self.time_slot_embedding)
 
         
 
     def start(self, checkins, weightL = 0.1, K = 10, M = 100):
         checkins["datetime"] = pd.to_datetime(checkins["datetime"])
-        checkins["placeid_int"] = checkins["placeid_int"].astype("int")
-
 
         self._create_user_location_frequency_matrix(checkins)
         self._create_location_coocurrency_matrix(checkins)
         self._create_user_time_frequency_matrix(checkins)
         self._create_location_time_matrix(checkins)
 
+    
         self._initialize_parameters(checkins, K, M)
+
+        
+
         value = 100000
         print(self.target_Location_embedding.shape)
+        
         for i in range(10):
             self._optimize_parameters(K, M, weightL)
             objective_func = self._objective_function(weightL)
             if((value - objective_func) <= 0.1):
                 break
-            value = objective_func              
+            value = objective_func                        
 
         """self._weight = weight
         
