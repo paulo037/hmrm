@@ -5,7 +5,6 @@ from domain.hmrm_domain import HmrmDomain
 from extractor.file_extractor import FileExtractor
 from foundation.configuration.input import Input 
 from loader.file_loader import FileLoader
-import pandas as pd
 
 class HmrmBaseline():
 
@@ -24,7 +23,7 @@ class HmrmBaseline():
        
         output_filename = Input.get_instance().inputs["features_filename"]
 
-        self.hmrm_domain.start(users_checkin, 0.5, 20, 50)
+        self.hmrm_domain.start(users_checkin, 0.5, 7, 50)
    
         df = pd.DataFrame( data = np.concatenate(
                                             (self.hmrm_domain.context_location_embedding,

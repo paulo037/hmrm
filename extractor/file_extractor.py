@@ -2,7 +2,6 @@ import json
 
 import pandas as pd
 import os
-from tensorflow.keras.models import load_model
 from scipy import sparse
 
 from foundation.configuration.input import Input
@@ -44,10 +43,6 @@ class FileExtractor:
         df = pd.read_csv(self.ground_truth_filename)
 
         return df
-
-    def read_model(self, filename):
-
-        return load_model(filename)
 
     def read_json(self, filename):
 
