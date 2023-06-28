@@ -1,11 +1,11 @@
 from foundation.abs_classes.singleton import Singleton
 
-class Input(Singleton):
 
+class Input(Singleton):
     inputs = dict()
+
     def set_inputs(cls, inputs):
         cls.get_instance().inputs = inputs
-
 
     @classmethod
     def get_arg(cls, arg):
