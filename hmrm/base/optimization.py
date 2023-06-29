@@ -5,7 +5,7 @@ from numpy.linalg import inv as inverse
 import scipy.sparse as sparse
 
 
-class HmrmDomain:
+class Optimizer:
     def __init__(self):
         self._user_location_frequency = np.array([])
         self._user_time_frequency = np.array([])
@@ -322,7 +322,7 @@ class HmrmDomain:
 
         value = 100000
 
-        for i in range(1):
+        for i in range(10):
             print(i)
             self._optimize_parameters(K, M, l2_weight)
             objective_func = self._objective_function(l2_weight)
