@@ -15,7 +15,9 @@ class HmrmBaseline:
 
     def start(self):
         users_checkin_filename = Input.get_instance().inputs["users_checkin_filename"]
-        users_checkin = pd.read_csv(users_checkin_filename, index_col=False)
+        users_checkin = pd.read_csv(users_checkin_filename, index_col=False).dropna(
+            axis=1
+        )
 
         users_checkin.userid = pd.factorize(users_checkin.userid)[0].astype(int)
         users_checkin.placeid = pd.factorize(users_checkin.placeid)[0].astype(int)
@@ -29,7 +31,7 @@ class HmrmBaseline:
             data=np.concatenate(
                 (
                     self.hmrm_domain.context_location_embedding,
-                    self.hmrm_domain.target_Location_embedding,
+                    self.hmrm_domain.target_location_embedding,
                 ),
                 axis=1,
             )

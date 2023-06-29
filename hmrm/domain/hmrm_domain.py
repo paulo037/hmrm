@@ -16,7 +16,7 @@ class HmrmDomain:
         self.activity_time = np.array([])
         self.user_activity = np.array([])
         self.activity_embedding = np.array([])
-        self.target_Location_embedding = np.array([])
+        self.target_location_embedding = np.array([])
         self.context_location_embedding = np.array([])
         self.time_slot_embedding = np.array([])
 
@@ -100,54 +100,66 @@ class HmrmDomain:
         l_occurrency = np.sum(Dt, axis=1).reshape(-1, 1)
         c_occurrency = np.sum(Dt, axis=0).reshape(1, -1)
 
-        self._location_time = np.maximum(
-            np.log2(np.maximum(Dt * sum_of_dt, 1) / (l_occurrency * c_occurrency)), 0
-        )
+        mult = l_occurrency * c_occurrency
+        mult[mult == 0] = -1
 
-    def _objective_function(self, weightL):
-        first_equation = weightL * norm(
-            (
-                self._user_location_frequency
-                - np.dot(self.user_activity, self.activity_location.T)
-            )
-        )
-        second_equation = (1 - weightL) * norm(
-            (
-                self._user_time_frequency
-                - np.dot(self.user_activity, self.activity_time.T)
-            )
-        )
-        activity_modeling_component = first_equation + second_equation
+        tmp = np.maximum(Dt * sum_of_dt, 1) / mult
+        tmp[tmp < 0] = 0
+        self._location_time = np.maximum(np.log2(tmp), 0)
 
-        first_equation = weightL * norm(
-            (
-                self._location_co_ocurrency
-                - np.dot(
-                    self.target_Location_embedding, self.context_location_embedding.T
+    def _objective_function(self, l2_weight):
+        def first_component(l2_weight):
+            first_equation = l2_weight * norm(
+                (
+                    self._user_location_frequency
+                    - np.dot(self.user_activity, self.activity_location.T)
                 )
             )
-        )
-        second_equation = (1 - weightL) * norm(
-            (
-                self._location_time
-                - np.dot(self.target_Location_embedding, self.time_slot_embedding.T)
-            )
-        )
-        trajectory_embedding_component = first_equation + second_equation
 
-        first_equation = weightL * norm(
-            (
-                self.activity_location
-                - np.dot(self.context_location_embedding, self.activity_embedding.T)
+            second_equation = (1 - l2_weight) * norm(
+                (
+                    self._user_time_frequency
+                    - np.dot(self.user_activity, self.activity_time.T)
+                )
             )
-        )
-        second_equation = (1 - weightL) * norm(
-            (
-                self.activity_time
-                - np.dot(self.time_slot_embedding, self.activity_embedding.T)
+            return first_equation + second_equation
+
+        def second_component(l2_weight):
+            first_equation = l2_weight * norm(
+                (
+                    self._location_co_ocurrency
+                    - np.dot(
+                        self.target_location_embedding,
+                        self.context_location_embedding.T,
+                    )
+                )
             )
-        )
-        collaborative_learning_component = first_equation + second_equation
+            second_equation = (1 - l2_weight) * norm(
+                (
+                    self._location_time
+                    - np.dot(self.target_location_embedding, self.time_slot_embedding.T)
+                )
+            )
+            return first_equation + second_equation
+
+        def third_component(l2_weight):
+            first_equation = l2_weight * norm(
+                (
+                    self.activity_location
+                    - np.dot(self.context_location_embedding, self.activity_embedding.T)
+                )
+            )
+            second_equation = (1 - l2_weight) * norm(
+                (
+                    self.activity_time
+                    - np.dot(self.time_slot_embedding, self.activity_embedding.T)
+                )
+            )
+            return first_equation + second_equation
+
+        activity_modeling_component = first_component(l2_weight)
+        trajectory_embedding_component = second_component(l2_weight)
+        collaborative_learning_component = third_component(l2_weight)
 
         objective_function = (
             activity_modeling_component
@@ -159,7 +171,7 @@ class HmrmDomain:
         objective_function += self._weight * norm(self.activity_embedding)
         objective_function += self._weight * norm(self.activity_location)
         objective_function += self._weight * norm(self.context_location_embedding)
-        objective_function += self._weight * norm(self.target_Location_embedding)
+        objective_function += self._weight * norm(self.target_location_embedding)
         objective_function += self._weight * norm(self.time_slot_embedding)
 
         return objective_function
@@ -173,116 +185,132 @@ class HmrmDomain:
         self.activity_time = np.random.normal(size=(time_slot, K))
         self.user_activity = np.random.normal(size=(total_users, K))
         self.activity_embedding = np.random.normal(size=(K, M))
-        self.target_Location_embedding = np.random.normal(size=(total_locations, M))
+        self.target_location_embedding = np.random.normal(size=(total_locations, M))
         self.context_location_embedding = np.random.normal(size=(total_locations, M))
         self.time_slot_embedding = np.random.normal(size=(time_slot, M))
 
-    def _optimize_parameters(self, K, M, weightL):
+    def user_activity_embedding_function(self, K, l2_weight):
         first_equation = (
-            weightL * (self._user_location_frequency * self.activity_location)
-        ) + ((1 - weightL) * np.dot(self._user_time_frequency, self.activity_time))
+            l2_weight * (self._user_location_frequency * self.activity_location)
+        ) + ((1 - l2_weight) * np.dot(self._user_time_frequency, self.activity_time))
         second_equation = (
-            weightL * np.dot(self.activity_location.T, self.activity_location)
+            l2_weight * np.dot(self.activity_location.T, self.activity_location)
         ) + (
-            (1 - weightL) * np.dot(self.activity_time.T, self.activity_time)
-            + (weightL * np.identity(K))
+            (1 - l2_weight) * np.dot(self.activity_time.T, self.activity_time)
+            + (l2_weight * np.identity(K))
         )
-        self.user_activity = np.dot(first_equation, inverse(second_equation))
-        # self.user_activity = np.nan_to_num(self.user_activity)
-        print(self.user_activity)
+        return np.dot(first_equation, inverse(second_equation))
 
-        first_equation = weightL * (
+    def acticity_location_embedding_function(self, K, l2_weight):
+        first_equation = l2_weight * (
             (self._user_location_frequency.T * self.user_activity)
             + np.dot(self.context_location_embedding, self.activity_embedding.T)
         )
         second_equation = (
-            weightL * np.dot(self.user_activity.T, self.user_activity)
-        ) + ((self._weight + weightL) * np.identity(K))
-        self.activity_location = np.dot(first_equation, inverse(second_equation))
-        # print(self.activity_location.shape)
+            l2_weight * np.dot(self.user_activity.T, self.user_activity)
+        ) + ((self._weight + l2_weight) * np.identity(K))
+        return np.dot(first_equation, inverse(second_equation))
 
-        first_equation = (1 - weightL) * (
+    def activity_time_embedding_function(self, K, l2_weight):
+        first_equation = (1 - l2_weight) * (
             np.dot(self._user_time_frequency.T, self.user_activity)
             + np.dot(self.time_slot_embedding, self.activity_embedding.T)
         )
-        second_equation = (1 - weightL) * (
+        second_equation = (1 - l2_weight) * (
             np.dot(self.user_activity.T, self.user_activity)
-            + (1 - self._weight + weightL) * np.identity(K)
+            + (1 - self._weight + l2_weight) * np.identity(K)
         )
-        self.activity_time = np.dot(first_equation, inverse(second_equation))
-        # self.activity_time = np.nan_to_num(self.activity_time)
+        return np.dot(first_equation, inverse(second_equation))
 
+    def activity_embedding_function(self, M, l2_weight):
         first_equation = (
-            weightL * np.dot(self.activity_location.T, self.context_location_embedding)
-        ) + ((1 - weightL) * np.dot(self.activity_time.T, self.time_slot_embedding))
+            l2_weight
+            * np.dot(self.activity_location.T, self.context_location_embedding)
+        ) + ((1 - l2_weight) * np.dot(self.activity_time.T, self.time_slot_embedding))
         second_equation = (
             (
-                weightL
+                l2_weight
                 * np.dot(
                     self.context_location_embedding.T, self.context_location_embedding
                 )
             )
             + (
-                (1 - weightL)
+                (1 - l2_weight)
                 * np.dot(self.time_slot_embedding.T, self.time_slot_embedding)
             )
             + (self._weight * np.identity(M))
         )
-        self.activity_embedding = np.dot(first_equation, inverse(second_equation))
-        # self.activity_embedding = np.nan_to_num(self.activity_embedding)
+        return np.dot(first_equation, inverse(second_equation))
 
+    def target_location_embedding_function(self, M, l2_weight):
         first_equation = (
-            weightL * (self._location_co_ocurrency * self.context_location_embedding)
-        ) + ((1 - weightL) * np.dot(self._location_time, self.time_slot_embedding))
+            l2_weight * self._location_co_ocurrency * self.context_location_embedding
+        ) + ((1 - l2_weight) * np.dot(self._location_time, self.time_slot_embedding))
+
         second_equation = (
             (
-                weightL
+                l2_weight
                 * np.dot(
                     self.context_location_embedding.T, self.context_location_embedding
                 )
             )
             + (
-                (1 - weightL)
+                (1 - l2_weight)
                 * np.dot(self.time_slot_embedding.T, self.time_slot_embedding)
             )
             + (self._weight * np.identity(M))
         )
-        self.target_Location_embedding = np.dot(
-            first_equation, inverse(second_equation)
-        )
-        # self.target_Location_embedding = np.nan_to_num(self.target_Location_embedding)
 
-        first_equation = weightL * (
-            self._location_co_ocurrency.T * self.target_Location_embedding
+        return np.dot(first_equation, inverse(second_equation))
+
+    def context_location_embedding_function(self, M, l2_weight):
+        first_equation = l2_weight * (
+            self._location_co_ocurrency.T * self.target_location_embedding
             + np.dot(self.activity_location, self.activity_embedding)
         )
         second_equation = (
-            weightL
+            l2_weight
             * (
-                np.dot(self.target_Location_embedding.T, self.target_Location_embedding)
+                np.dot(self.target_location_embedding.T, self.target_location_embedding)
                 + np.dot(self.activity_embedding.T, self.activity_embedding)
             )
         ) + (self._weight * np.identity(M))
-        self.context_location_embedding = np.dot(
-            first_equation, inverse(second_equation)
-        )
-        # self.context_location_embedding = np.nan_to_num(self.context_location_embedding)
+        return np.dot(first_equation, inverse(second_equation))
 
-        first_equation = (1 - weightL) * (
-            np.dot(self._location_time.T, self.target_Location_embedding)
+    def time_slot_embedding_function(self, M, l2_weight):
+        first_equation = (1 - l2_weight) * (
+            np.dot(self._location_time.T, self.target_location_embedding)
             + np.dot(self.activity_time, self.activity_embedding)
         )
         second_equation = (
-            (1 - weightL)
+            (1 - l2_weight)
             * (
-                np.dot(self.target_Location_embedding.T, self.target_Location_embedding)
+                np.dot(self.target_location_embedding.T, self.target_location_embedding)
                 + np.dot(self.activity_embedding.T, self.activity_embedding)
             )
         ) + (self._weight * np.identity(M))
-        self.time_slot_embedding = np.dot(first_equation, inverse(second_equation))
-        # self.time_slot_embedding = np.nan_to_num(self.time_slot_embedding)
+        return np.dot(first_equation, inverse(second_equation))
 
-    def start(self, checkins, weightL=0.1, K=10, M=100):
+    def _optimize_parameters(self, K, M, l2_weight):
+        self.user_activity = self.user_activity_embedding_function(K, l2_weight)
+        self.user_activity[self.user_activity < 0] = 0
+
+        self.activity_location = self.acticity_location_embedding_function(K, l2_weight)
+        self.activity_location[self.activity_location < 0] = 0
+
+        self.activity_time = self.activity_time_embedding_function(K, l2_weight)
+        self.activity_time[self.activity_time < 0] = 0
+
+        self.activity_embedding = self.activity_embedding_function(M, l2_weight)
+        self.target_location_embedding = self.target_location_embedding_function(
+            M, l2_weight
+        )
+        self.context_location_embedding = self.context_location_embedding_function(
+            M, l2_weight
+        )
+        self.time_slot_embedding = self.time_slot_embedding_function(M, l2_weight)
+
+    def start(self, checkins, l2_weight=0.1, K=10, M=100):
         checkins["datetime"] = pd.to_datetime(checkins["datetime"])
 
         self._create_user_location_frequency_matrix(checkins)
@@ -293,11 +321,20 @@ class HmrmDomain:
         self._initialize_parameters(checkins, K, M)
 
         value = 100000
-        print(self.target_Location_embedding.shape)
 
-        for i in range(10):
-            self._optimize_parameters(K, M, weightL)
-            objective_func = self._objective_function(weightL)
+        for i in range(1):
+            print(i)
+            self._optimize_parameters(K, M, l2_weight)
+            objective_func = self._objective_function(l2_weight)
+
+            # print("user activity:", self.user_activity) # theta
+            # print("activity location:", self.activity_location) # Al
+            # print("activity time:", self.activity_time) # At
+            # print("activity embedding:", self.activity_embedding) # Ea
+            # print("target location embedding:", self.target_location_embedding) # El
+            # print("context location embedding:", self.context_location_embedding) # Ec
+            # print("time slot embedding:", self.time_slot_embedding) # Et
+
             if (value - objective_func) <= 0.1:
                 break
             value = objective_func
